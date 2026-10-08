@@ -36,8 +36,20 @@ const evaluate = async expression => {
   if (result.exceptionDetails) throw new Error(result.exceptionDetails.exception?.description || result.exceptionDetails.text);
   return result.result.value;
 };
+const assertSidebarDecorationIsClear = async () => {
+  const state = await evaluate(`(() => {
+    const sidebar = document.querySelector('#root aside.app-shell-left-panel');
+    if (!sidebar) return null;
+    const style = getComputedStyle(sidebar, '::after');
+    return { background: style.backgroundColor, pointerEvents: style.pointerEvents };
+  })()`);
+  if (!state) return;
+  assert.equal(state.background, "rgba(0, 0, 0, 0)", "侧栏延伸装饰不能把深色底色画在聊天文字上");
+  assert.equal(state.pointerEvents, "none", "装饰不能截获聊天区域的点击");
+};
 const apply = async (action, value, amount = "0.85", clarity = "clear") => {
   const result = await run(process.execPath, [helper, action, String(port), value, amount, clarity]);
+  if (action.startsWith("apply")) await assertSidebarDecorationIsClear();
   return result.stdout.trim();
 };
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -51,6 +63,7 @@ if (!builtinEffects.includes(before.kind)) {
   socket.close();
   throw new Error("测试前请先从菜单选择一个内置效果，避免改变照片或视频背景。");
 }
+await assertSidebarDecorationIsClear();
 try {
   for (const [effect, count] of [["gradient", 3], ["aurora", 3], ["bokeh", 12], ["meteors", 7]]) {
     await apply("apply-effect", effect);
