@@ -7,3 +7,6 @@ mkdir -p build
 xcrun swiftc -module-cache-path build/module-cache-tests \
   src/MenuInteraction.swift tests/menu-controls/main.swift -o build/test-menu-controls
 build/test-menu-controls
+xcrun swiftc -module-cache-path build/module-cache-tests \
+  src/BackgroundConnection.swift tests/background-connection/main.swift -o build/test-background-connection
+build/test-background-connection

@@ -40,3 +40,13 @@
 - 3.5.2（build 11）完成双架构构建、签名和 ZIP 校验，已更新本机助手；安装包内 helper 与验证源码一致，菜单 self-test 通过，Codex 主进程未重启。
 - 原 3.5.1 助手保存在 `build/backups/CodexDynamicBackground-3.5.1-build10-before-sidebar-fix.app`。
 - 问题与验收以 [Issue #3](https://github.com/zczshahaha-del/CodexBackdrop/issues/3) 为主记录，原聊天场景仍待用户确认。
+
+## 3.5.3 应用背景不重启 Codex
+
+- [Issue #5](https://github.com/zczshahaha-del/CodexBackdrop/issues/5) 为主要记录。退出、重启 Codex 的实现与按钮已移除，启动参数不再使用 `open -n`。
+- `bash scripts/test-menu.sh` 通过，覆盖已有连接、运行中等待、未运行时启动、启动竞争、超时、启动失败、最后选择、保存与取消；使用隔离偏好域，不修改用户设置。
+- 最终构建的 `--no-restart-smoke-test` 在本机实际走应用和关闭路径：Codex 正在运行而 9224 未连接，选择进入等待，关闭后取消，启动入口禁用；主进程 PID 前后相同。该检查使用临时独立偏好域并清理。
+- JavaScript、Shell、plist 检查以及 arm64 + x86_64 构建、签名、ZIP 校验通过；已安装 3.5.3（build 12），原设置与媒体保留。
+- 原安装版备份为 `build/backups/CodexDynamicBackground-3.5.2-installed-before-no-restart.app`，本机检查输出仅保存在被忽略的 `build/qa/`。
+- 原生 UI 自动化工具无法读取助手菜单；应用内部的原生菜单检查与连接路径验证通过，未宣称完成手动菜单验收。
+- 当前 Codex 未开启背景连接，因此没有重新运行实际窗口的渲染测试；已有连接和正常启动的连接时序使用模拟依赖验证。用户下次正常打开并启用背景连接后的实际显示、切换仍待验收，Issue 和草稿 PR 保持开放。
