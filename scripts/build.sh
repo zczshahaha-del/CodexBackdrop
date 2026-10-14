@@ -7,9 +7,9 @@ bash scripts/check.sh
 
 mkdir -p build dist
 for architecture in arm64 x86_64; do
-  xcrun swiftc -O -target "$architecture-apple-macos13.0" \
+  xcrun swiftc -O -parse-as-library -target "$architecture-apple-macos13.0" \
     -module-cache-path "build/module-cache-$architecture" \
-    src/MenuBarApp.swift -o "build/CodexDynamicBackground-$architecture"
+    src/*.swift -o "build/CodexDynamicBackground-$architecture"
 done
 xcrun lipo -create build/CodexDynamicBackground-arm64 build/CodexDynamicBackground-x86_64 \
   -output build/CodexDynamicBackground

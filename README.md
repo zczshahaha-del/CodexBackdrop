@@ -1,6 +1,6 @@
 # CodexBackdrop
 
-给 macOS Codex 桌面应用添加动态背景、照片或视频的本地菜单栏助手。应用中仍显示为「Codex 动态背景」，当前版本为 3.5.0。
+给 macOS Codex 桌面应用添加动态背景、照片或视频的本地菜单栏助手。应用中仍显示为「Codex 动态背景」，当前版本为 3.5.2。
 
 这是个人开发的非官方增强，不修改 Codex 的安装文件，也不上传背景文件。Codex 更新后可能需要修复连接或重新适配界面。
 
@@ -34,6 +34,12 @@ open "dist/Codex 动态背景.app"
 
 ```sh
 bash scripts/check.sh
+```
+
+原生菜单与透明度更新的回归检查不会连接 Codex，也不会改变用户设置：
+
+```sh
+bash scripts/test-menu.sh
 ```
 
 连接实际 Codex 窗口的测试会临时切换背景，不会重启 Codex。先从菜单选择一个内置效果，并确保背景连接已开启：
@@ -71,3 +77,7 @@ mkdir -p build/qa
 - `docs/`：需求、架构、使用说明和排障记录。
 
 项目尚未选择开源许可证。
+
+## 开发与问题记录
+
+按 [项目规则](AGENTS.md) 使用 GitHub Issue、开发分支、Commit 和 PR。Bug 的完整记录放在 Issue，本地排障文档链接对应问题；验收未完成时保持 Issue 开放，合并需用户明确确认。

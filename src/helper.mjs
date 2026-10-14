@@ -77,6 +77,10 @@ const sharedCSS = `
     background: rgb(5 9 23 / var(--codex-sidebar-alpha, .34)) !important;
     backdrop-filter: blur(var(--codex-sidebar-blur, 7px)) saturate(120%) !important;
   }
+  #root aside.app-shell-left-panel::after {
+    /* Codex extends this decoration into the chat; inherited tint covers text. */
+    background: transparent !important;
+  }
   #root [class*="_ComposerLayoutRoot_"] {
     background: rgb(11 17 34 / var(--codex-composer-alpha, .70)) !important;
     backdrop-filter: blur(var(--codex-composer-blur, 7px)) saturate(112%) !important;

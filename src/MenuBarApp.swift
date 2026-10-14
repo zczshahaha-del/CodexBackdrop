@@ -27,7 +27,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var transparencySlider: NSSlider!
     private var transparencyLabel: NSTextField!
     private var clarityMenuItem: NSMenuItem!
-    private var transparencyWorkItem: DispatchWorkItem?
+    private lazy var transparencyUpdates = TransparencyUpdateCoordinator { [weak self] selection, completion in
+        guard let self else { completion(); return }
+        let amount = String(format: "%.2f", selection.amount)
+        let clarity = selection.keepBackgroundClear ? "clear" : "linked"
+        self.runHelper(["set-transparency", self.port, amount, clarity]) { _ in completion() }
+    }
     private var isApplying = false
     private var isCheckingConnection = false
     private var recoveryTimer: Timer?
@@ -89,11 +94,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         configureStatusItem()
         if CommandLine.arguments.contains("--self-test") {
+            menu.update()
+            precondition(menu.items.first(where: { $0.view != nil })?.isEnabled == true)
+            setBusy(true)
+            precondition(transparencySlider.isEnabled, "后台应用不能禁用滑杆")
+            precondition(modeItems.values.allSatisfy { !$0.isEnabled })
+            setBusy(false)
             let titles = menu.items.map { $0.title }.filter { !$0.isEmpty }
             print("menu=\(titles.joined(separator: "|"))")
             print("slider=\(transparencySlider.minValue)-\(transparencySlider.maxValue),value=\(transparencySlider.doubleValue)")
             print("keepBackgroundClear=\(keepBackgroundClear)")
             print("automaticRestoreEnabled=\(automaticRestoreEnabled)")
+            print("sliderInteractiveDuringBackgroundApply=true")
             print("launchArguments=\(launchArguments.joined(separator: "|"))")
             fflush(stdout)
             exit(0)
@@ -104,9 +116,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         recoveryTimer = timer
         RunLoop.main.add(timer, forMode: .common)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+        let openMenuTimer = Timer(timeInterval: 0.35, repeats: false) { [weak self] _ in
             self?.statusItem.button?.performClick(nil)
         }
+        RunLoop.main.add(openMenuTimer, forMode: .common)
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -123,7 +136,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem.button?.image = NSImage(systemSymbolName: "sparkles", accessibilityDescription: "Codex 动态背景")
         statusItem.button?.toolTip = "Codex 动态背景"
 
-        menu = NSMenu(title: "Codex 动态背景")
+        menu = makeInteractiveMenu(title: "Codex 动态背景")
         menu.delegate = self
 
         let titleItem = NSMenuItem(title: "Codex 动态背景", action: nil, keyEquivalent: "")
@@ -226,7 +239,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func setBusy(_ busy: Bool, text: String? = nil) {
         isApplying = busy
         for item in modeItems.values { item.isEnabled = !busy }
-        transparencySlider?.isEnabled = !busy
+        // Changes are saved immediately and sent after any background application.
+        // Automatic recovery must not interrupt an active slider drag.
+        transparencyUpdates.isApplyingBackground = busy
         clarityMenuItem?.isEnabled = !busy
         if let text { statusMenuItem.title = "状态：\(text)" }
         statusItem.button?.image = NSImage(
@@ -291,24 +306,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func transparencyChanged() {
         transparency = transparencySlider.doubleValue
         updateTransparencyPresentation()
-        transparencyWorkItem?.cancel()
-
-        let value = transparency
-        let workItem = DispatchWorkItem { [weak self] in
-            guard let self, self.debugPortReady() else { return }
-            self.runHelper(["set-transparency", self.port, String(format: "%.2f", value), self.clarityModeArgument]) { _ in }
-        }
-        transparencyWorkItem = workItem
-        DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 0.12, execute: workItem)
+        transparencyUpdates.request(amount: transparency, keepBackgroundClear: keepBackgroundClear)
     }
 
     @objc private func toggleBackgroundClarity() {
         keepBackgroundClear.toggle()
         clarityMenuItem.state = keepBackgroundClear ? .on : .off
         updateTransparencyPresentation()
-        guard debugPortReady() else { return }
-        let amount = String(format: "%.2f", transparency)
-        runHelper(["set-transparency", port, amount, clarityModeArgument]) { _ in }
+        transparencyUpdates.request(amount: transparency, keepBackgroundClear: keepBackgroundClear)
     }
 
     @objc private func disableBackground() {
@@ -414,14 +419,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self else { return }
             if self.debugPortReady() {
-                DispatchQueue.main.async {
+                performOnMainRunLoop {
                     self.setBusy(false)
                     completion()
                 }
                 return
             }
 
-            DispatchQueue.main.async {
+            performOnMainRunLoop {
                 self.setBusy(false)
                 let alert = NSAlert()
                 alert.messageText = "需要重新启动一次 Codex"
@@ -451,7 +456,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
 
             if !NSRunningApplication.runningApplications(withBundleIdentifier: "com.openai.codex").isEmpty {
-                DispatchQueue.main.async {
+                performOnMainRunLoop {
                     self.setBusy(false, text: "Codex 未能退出")
                     self.showError("Codex 没有正常退出，请手动退出后再试。")
                 }
@@ -465,7 +470,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 try process.run()
                 process.waitUntilExit()
             } catch {
-                DispatchQueue.main.async {
+                performOnMainRunLoop {
                     self.setBusy(false, text: "启动失败")
                     self.showError("无法重新启动 Codex：\(error.localizedDescription)")
                 }
@@ -475,7 +480,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let readyDeadline = Date().addingTimeInterval(35)
             while Date() < readyDeadline {
                 if self.debugPortReady() {
-                    DispatchQueue.main.async {
+                    performOnMainRunLoop {
                         self.setBusy(false)
                         completion()
                     }
@@ -484,7 +489,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 Thread.sleep(forTimeInterval: 0.3)
             }
 
-            DispatchQueue.main.async {
+            performOnMainRunLoop {
                 self.setBusy(false, text: "连接超时")
                 self.showError("Codex 已启动，但背景通道没有准备好。请稍后从菜单重新选择背景。")
             }
@@ -497,7 +502,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         DispatchQueue.global(qos: .utility).async { [weak self] in
             guard let self else { return }
             guard self.debugPortReady() else {
-                DispatchQueue.main.async {
+                performOnMainRunLoop {
                     self.isCheckingConnection = false
                     self.automaticRestoreAttempted = false
                     guard !self.isApplying else { return }
@@ -507,7 +512,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
 
             let result = self.runHelperSync(["status", self.port])
-            DispatchQueue.main.async {
+            performOnMainRunLoop {
                 self.isCheckingConnection = false
                 guard !self.isApplying else { return }
                 if result.exitCode == 0, result.output.trimmingCharacters(in: .whitespacesAndNewlines) == "active" {
@@ -558,7 +563,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self else { return }
             let result = self.runHelperSync(arguments)
-            DispatchQueue.main.async {
+            performOnMainRunLoop {
                 if result.exitCode == 0 {
                     completion(.success(result.output.trimmingCharacters(in: .whitespacesAndNewlines)))
                 } else {
@@ -602,8 +607,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 }
 
-let application = NSApplication.shared
-let applicationDelegate = AppDelegate()
-application.delegate = applicationDelegate
-application.setActivationPolicy(.accessory)
-application.run()
+@main
+struct CodexBackdropApplication {
+    static func main() {
+        let application = NSApplication.shared
+        let applicationDelegate = AppDelegate()
+        application.delegate = applicationDelegate
+        application.setActivationPolicy(.accessory)
+        withExtendedLifetime(applicationDelegate) {
+            application.run()
+        }
+    }
+}
