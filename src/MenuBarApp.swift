@@ -35,7 +35,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var transparencySlider: NSSlider!
     private var transparencyLabel: NSTextField!
     private var clarityMenuItem: NSMenuItem!
-    private var launchMenuItem: NSMenuItem!
     private lazy var transparencyUpdates = TransparencyUpdateCoordinator { [weak self] selection, completion in
         guard let self else { completion(); return }
         let amount = String(format: "%.2f", selection.amount)
@@ -46,7 +45,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var isCheckingConnection = false
     private var recoveryTimer: Timer?
     private var automaticRestoreAttempted = false
-    private var hasShownConnectionNotice = false
+    private var hasRequestedRepairConfirmation = false
 
     private var automaticRestoreEnabled: Bool { backgroundSelection.restorationEnabled }
 
@@ -102,7 +101,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         configureStatusItem()
         if let testSuiteName {
-            checkRunningCodexWithoutConnection(suiteName: testSuiteName)
+            checkCancelledConnectionRepair(suiteName: testSuiteName)
             return
         }
         if CommandLine.arguments.contains("--self-test") {
@@ -113,6 +112,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             precondition(modeItems.values.allSatisfy { !$0.isEnabled })
             setBusy(false)
             let titles = menu.items.map { $0.title }.filter { !$0.isEmpty }
+            precondition(!titles.contains("打开 Codex（启用背景连接）"))
             print("menu=\(titles.joined(separator: "|"))")
             print("slider=\(transparencySlider.minValue)-\(transparencySlider.maxValue),value=\(transparencySlider.doubleValue)")
             print("keepBackgroundClear=\(keepBackgroundClear)")
@@ -142,7 +142,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func menuWillOpen(_ menu: NSMenu) {
-        launchMenuItem.isEnabled = !isApplying && !codexIsRunning
         refreshStatus()
     }
 
@@ -186,12 +185,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let reapplyItem = NSMenuItem(title: "重新应用背景", action: #selector(reapplyCurrentBackground), keyEquivalent: "r")
         reapplyItem.target = self
         menu.addItem(reapplyItem)
-
-        launchMenuItem = NSMenuItem(title: "打开 Codex（启用背景连接）", action: #selector(openCodexWithBackground), keyEquivalent: "")
-        launchMenuItem.target = self
-        launchMenuItem.toolTip = "Codex 退出后可从这里正常打开；正在运行时不会退出或重启它"
-        launchMenuItem.isEnabled = !codexIsRunning
-        menu.addItem(launchMenuItem)
 
         let disableItem = NSMenuItem(title: "关闭动态背景", action: #selector(disableBackground), keyEquivalent: "")
         disableItem.target = self
@@ -264,7 +257,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // Automatic recovery must not interrupt an active slider drag.
         transparencyUpdates.isApplyingBackground = busy
         clarityMenuItem?.isEnabled = !busy
-        launchMenuItem?.isEnabled = !busy && !codexIsRunning
         if let text { statusMenuItem.title = "状态：\(text)" }
         statusItem.button?.image = NSImage(
             systemSymbolName: busy ? "sparkles.rectangle.stack" : "sparkles",
@@ -323,11 +315,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
         applyBackground(mode: mode, path: path)
-    }
-
-    @objc private func openCodexWithBackground() {
-        guard !codexIsRunning else { return }
-        reapplyCurrentBackground()
     }
 
     @objc private func transparencyChanged() {
@@ -451,19 +438,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         setBusy(true, text: "正在连接 Codex")
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self else { return }
-            let connection = CodexConnection(
-                isReady: { self.debugPortReady() },
-                isRunning: { self.codexIsRunning },
-                launchIfNotRunning: { try self.tryOpeningCodex() }
-            )
+            let connection = self.makeConnection()
             do {
                 let readiness = try connection.ensureReady()
                 performOnMainRunLoop {
                     self.setBusy(false)
                     if readiness == .ready { completion() }
                     else {
-                        self.statusMenuItem.title = "状态：已保存 · 等待背景连接"
-                        self.showWaitingForConnectionOnce()
+                        self.confirmConnectionRepair(completion)
                     }
                 }
             } catch {
@@ -482,19 +464,65 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return true
     }
 
-    private func showWaitingForConnectionOnce() {
-        guard testSuiteName == nil else { return }
-        guard !hasShownConnectionNotice else { return }
-        hasShownConnectionNotice = true
-        let alert = NSAlert()
-        alert.messageText = "背景已保存，等待连接"
-        alert.informativeText = "Codex 仍在运行，背景连接尚未开启。完成当前工作并自行退出 Codex 后，可从助手菜单选择“打开 Codex（启用背景连接）”。连接恢复后会应用最后选择的背景。"
-        alert.addButton(withTitle: "好")
-        NSApp.activate(ignoringOtherApps: true)
-        alert.runModal()
+    private func makeConnection(expectedPIDs: [pid_t]? = nil) -> CodexConnection {
+        CodexConnection(
+            isReady: { self.debugPortReady() },
+            isRunning: { self.codexIsRunning },
+            launchIfNotRunning: { try self.tryOpeningCodex() },
+            requestQuit: {
+                let applications = NSRunningApplication.runningApplications(withBundleIdentifier: "com.openai.codex")
+                guard let expectedPIDs,
+                      applications.map(\.processIdentifier).sorted() == expectedPIDs,
+                      applications.count == 1 else { throw CodexConnectionError.applicationChanged }
+                guard applications[0].terminate() else { throw CodexConnectionError.quitFailed }
+            }
+        )
     }
 
-    private func checkRunningCodexWithoutConnection(suiteName: String) {
+    private func confirmConnectionRepair(_ completion: @escaping () -> Void) {
+        let expectedPIDs = NSRunningApplication.runningApplications(withBundleIdentifier: "com.openai.codex")
+            .map(\.processIdentifier).sorted()
+        setBusy(true, text: "等待重启确认")
+        hasRequestedRepairConfirmation = true
+        let approved: Bool
+        if testSuiteName != nil {
+            approved = false
+        } else {
+            let alert = NSAlert()
+            alert.messageText = "需要重新启动 Codex"
+            alert.informativeText = "为开启背景连接，需要退出并重新打开 Codex。这会中断正在进行的聊天；背景和透明度设置会保留。是否继续？"
+            alert.addButton(withTitle: "重新启动并应用")
+            alert.addButton(withTitle: "取消")
+            NSApp.activate(ignoringOtherApps: true)
+            approved = alert.runModal() == .alertFirstButtonReturn
+        }
+        guard approved else {
+            setBusy(false, text: "已保存 · 已取消重启")
+            return
+        }
+        setBusy(true, text: "正在修复背景连接")
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self else { return }
+            do {
+                let readiness = try self.makeConnection(expectedPIDs: expectedPIDs).ensureReady(allowRestart: true)
+                performOnMainRunLoop {
+                    self.setBusy(false)
+                    if readiness == .ready { completion() }
+                    else {
+                        self.statusMenuItem.title = "状态：连接未开启 · 请重新应用"
+                        self.showError("Codex 已从其他入口打开，背景连接仍未开启。请重新应用背景，按提示重新建立连接。")
+                    }
+                }
+            } catch {
+                performOnMainRunLoop {
+                    self.setBusy(false, text: "已保存 · 连接修复未完成")
+                    self.showError(error.localizedDescription)
+                }
+            }
+        }
+    }
+
+    private func checkCancelledConnectionRepair(suiteName: String) {
         let pids = NSRunningApplication.runningApplications(withBundleIdentifier: "com.openai.codex").map(\.processIdentifier).sorted()
         guard !pids.isEmpty, !debugPortReady() else {
             defaults.removePersistentDomain(forName: suiteName)
@@ -513,10 +541,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             guard !isApplying else { return }
             let current = NSRunningApplication.runningApplications(withBundleIdentifier: "com.openai.codex").map(\.processIdentifier).sorted()
             precondition(current == pids, "不能退出、重启或重复打开 Codex")
-            precondition(!launchMenuItem.isEnabled, "运行中应禁用启动入口")
             if !checkedWaiting {
                 precondition(backgroundSelection.needsApply && automaticRestoreEnabled)
-                precondition(statusMenuItem.title == "状态：已保存 · 等待背景连接")
+                precondition(hasRequestedRepairConfirmation, "应用背景必须先请求重启确认")
+                precondition(statusMenuItem.title == "状态：已保存 · 已取消重启")
                 checkedWaiting = true
                 disableBackground()
             } else {
@@ -524,7 +552,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 precondition(statusMenuItem.title == "状态：背景已关闭")
                 timer.invalidate()
                 defaults.removePersistentDomain(forName: suiteName)
-                print("PASS: 本机应用背景后等待连接、关闭取消等待、启动入口禁用，Codex 主进程保持不变")
+                print("PASS: 应用先请求重启确认，取消后不退出或重复打开 Codex，关闭背景取消待应用选择")
                 fflush(stdout)
                 exit(0)
             }
@@ -543,8 +571,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     self.automaticRestoreAttempted = false
                     guard !self.isApplying else { return }
                     self.statusMenuItem.title = self.backgroundSelection.needsApply
-                        ? "状态：已保存 · 等待背景连接"
-                        : (self.automaticRestoreEnabled ? "状态：背景连接未开启" : "状态：背景已关闭")
+                        ? "状态：已保存 · 点击重新应用修复连接"
+                        : (self.automaticRestoreEnabled ? "状态：连接未开启 · 点击重新应用" : "状态：背景已关闭")
                 }
                 return
             }
@@ -651,8 +679,8 @@ struct CodexBackdropApplication {
     static func main() {
         let application = NSApplication.shared
         let applicationDelegate: AppDelegate
-        if CommandLine.arguments.contains("--no-restart-smoke-test") {
-            let suite = "CodexBackdrop.NoRestartSmoke.\(UUID().uuidString)"
+        if CommandLine.arguments.contains("--cancel-repair-smoke-test") {
+            let suite = "CodexBackdrop.CancelRepairSmoke.\(UUID().uuidString)"
             applicationDelegate = AppDelegate(defaults: UserDefaults(suiteName: suite)!, testSuiteName: suite)
         } else {
             applicationDelegate = AppDelegate()

@@ -1,6 +1,6 @@
 # CodexBackdrop
 
-给 macOS Codex 桌面应用添加动态背景、照片或视频的本地菜单栏助手。应用中仍显示为「Codex 动态背景」，当前版本为 3.5.3。
+给 macOS Codex 桌面应用添加动态背景、照片或视频的本地菜单栏助手。应用中仍显示为「Codex 动态背景」，当前版本为 3.5.4。
 
 这是个人开发的非官方增强，不修改 Codex 的安装文件，也不上传背景文件。Codex 更新后可能需要修复连接或重新适配界面。
 
@@ -26,7 +26,7 @@ bash scripts/build.sh
 open "dist/Codex 动态背景.app"
 ```
 
-点击菜单栏星光图标选择背景。背景连接已开启时直接应用；Codex 正在运行但没有连接时，先保存选择，等待连接恢复，不会退出或重启 Codex。完成当前工作并自行退出 Codex 后，可从助手菜单选择「打开 Codex（启用背景连接）」正常启动并应用背景。Codex 未运行时，选择背景也会正常打开它。
+点击菜单栏星光图标选择背景，或点「重新应用背景」。助手先检查连接：已有连接直接应用；Codex 正在运行但没有连接时，弹出重启确认，只有点击「重新启动并应用」才会正常退出、重新打开并应用背景。点击「取消」保留选择，不退出 Codex。Codex 未运行时，选择背景会正常打开它。后台恢复不会弹出重启确认或重启 Codex。
 
 完整操作见 [使用说明](docs/使用说明.txt)。当前构建只进行本地 ad-hoc 签名，未做 Apple 公证；不是 App Store 安装包。
 
@@ -36,16 +36,16 @@ open "dist/Codex 动态背景.app"
 bash scripts/check.sh
 ```
 
-原生菜单、透明度更新与连接等待的回归检查不会连接 Codex，也不会改变用户设置：
+原生菜单、透明度更新与连接修复的回归检查使用模拟依赖，不会重启 Codex，也不会改变用户设置：
 
 ```sh
 bash scripts/test-menu.sh
 ```
 
-当 Codex 正在运行且 9224 背景连接未开启时，可验证实际应用路径不会退出或重新打开它。此项使用临时独立设置并自动清理，保留用户原设置：
+当 Codex 正在运行且 9224 背景连接未开启时，可验证应用背景请求确认后，模拟取消决定不会退出或重新打开它。此项使用临时独立设置并自动清理，不代表实际鼠标点击验收：
 
 ```sh
-"dist/Codex 动态背景.app/Contents/MacOS/CodexDynamicBackground" --no-restart-smoke-test
+"dist/Codex 动态背景.app/Contents/MacOS/CodexDynamicBackground" --cancel-repair-smoke-test
 ```
 
 连接实际 Codex 窗口的测试会临时切换背景，不会重启 Codex。先从菜单选择一个内置效果，并确保背景连接已开启：
