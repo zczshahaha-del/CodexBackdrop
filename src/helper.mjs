@@ -81,10 +81,17 @@ const sharedCSS = `
     /* Codex extends this decoration into the chat; inherited tint covers text. */
     background: transparent !important;
   }
-  #root [class*="_ComposerLayoutRoot_"] {
+  #root [class*="_ComposerLayoutRoot_"]:not([data-composer-utility-bar-variant="home"]) {
     background: rgb(11 17 34 / var(--codex-composer-alpha, .70)) !important;
     backdrop-filter: blur(var(--codex-composer-blur, 7px)) saturate(112%) !important;
     border-color: rgba(255, 255, 255, .12) !important;
+  }
+  #root [class*="_ComposerLayoutRoot_"][data-composer-utility-bar-variant="home"] {
+    /* Home paints its rounded surface on the inner body, not this layout box. */
+    background: transparent !important;
+    backdrop-filter: none !important;
+    --composer-layout-surface-background: rgb(11 17 34 / var(--codex-composer-alpha, .70)) !important;
+    --composer-layout-surface-backdrop-filter: blur(var(--codex-composer-blur, 7px)) saturate(112%) !important;
   }
   #root .pointer-events-none.absolute.inset-x-0.bottom-0[class*="bg-gradient-to-t"][class*="from-surface"] {
     background-image: none !important;

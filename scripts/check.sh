@@ -27,4 +27,5 @@ plutil -lint src/Info.plist
 bash -n scripts/build.sh
 bash -n scripts/check.sh
 bash -n scripts/test-menu.sh
+bash -n scripts/test-composer.sh
 echo "脚本语法与应用信息检查通过。"
