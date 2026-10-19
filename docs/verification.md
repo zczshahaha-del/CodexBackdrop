@@ -60,3 +60,11 @@
 - 已更新本机原背景助手为 3.5.4（build 14），保留用户设置与旧助手备份，安装后的菜单检查通过。原 Codex 的文件及运行进程未变。
 - `MenuInteraction.swift`、菜单回归测试和 `helper.mjs` 与修改前完全一致，保留滑杆和侧栏装饰透明修复。
 - 尚未执行新版本“用户点击确认后实际重启并显示背景”的完整验收；没有为测试退出 Codex。实际鼠标拖动、原遮挡场景和视频解码也未在本轮重新验收，不能将模拟检查算作这些项目通过。Issue 保持开放，PR 保持草稿。
+
+## 3.5.5 新建对话输入框底层修复
+
+- [Issue #8](https://github.com/zczshahaha-del/CodexBackdrop/issues/8)：对照本机 Codex 26.1013.40934 的静态样式，确认 home 布局的圆角面板由内层 Body 绘制。只调整助手共享 CSS：home 外层透明，沿用原生面板变量绘制内层；已有对话规则保持不变，没有修改布局尺寸或按钮位置。
+- 新增离线 WebKit 回归 `bash scripts/test-composer.sh`。旧样式明确失败于“Home wrapper paints a rectangular background”；修复后 home/已有对话往返、新建节点、两档透明度、清晰模式、圆角与几何位置、侧栏装饰检查全部通过。检查了自有测试页面截图，没有读取真实聊天内容。
+- `bash scripts/check.sh`、`bash scripts/test-menu.sh`、`bash scripts/build.sh` 通过；完成双架构编译、签名和 ZIP 校验。菜单、连接修复和滑杆的 Swift 源码与 3.5.4 完全一致。
+- 已更新本机助手为 3.5.5（build 15），旧版保存在被忽略的 `build/backups/`。安装后菜单自检通过，完整偏好设置前后相同，Codex 主进程不变；已通过助手原有功能重新应用当前渐变背景，退出码为 0，设置保持不变。没有重启 Codex，也未切换背景种类。
+- 真实 Codex 新建对话页面仍待用户视觉验收，不能将离线页面断言或应用成功当作实际页面验收。Issue 保持开放，PR 保持草稿。
